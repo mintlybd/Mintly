@@ -59,42 +59,18 @@
         .refer-card { background: var(--card-bg); color: #fff; border-radius: var(--border-radius); padding: 22px; margin-bottom: 12px; text-align: center; border: 2px solid #fff; }
         .input-field { width: 100%; padding: 14px; border: 2px solid #eee; border-radius: 15px; margin-bottom: 12px; outline: none; background: #f9f9f9; color: #333; font-weight: 600; font-size: 15px; }
 
-        /* --- Updated Navigation Bar --- */
         .nav-bar { 
-            position: absolute; 
-            bottom: 0; 
-            width: 100%; 
-            height: 85px; /* Height increased */
-            background: var(--bg); 
-            display: flex; 
-            border-top: 3px solid rgba(255,255,255,0.4); 
-            z-index: 1000;
-            padding-bottom: 10px; /* Shifted slightly up */
-            align-items: center;
+            position: absolute; bottom: 0; width: 100%; height: 85px; 
+            background: var(--bg); display: flex; border-top: 3px solid rgba(255,255,255,0.4); 
+            z-index: 1000; padding-bottom: 10px; align-items: center;
         }
         .nav-item { 
-            flex: 1; 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            justify-content: center; 
-            color: rgba(255,255,255,0.5); 
-            cursor: pointer;
-            transition: 0.3s;
+            flex: 1; display: flex; flex-direction: column; align-items: center; 
+            justify-content: center; color: rgba(255,255,255,0.5); cursor: pointer; transition: 0.3s;
         }
-        .nav-item.active { 
-            color: #fff; 
-            transform: translateY(-5px); /* Active tab moves up */
-        }
-        .nav-item i {
-            font-size: 26px; /* Bigger icons */
-            margin-bottom: 4px;
-        }
-        .nav-item span { 
-            font-size: 13px; /* Slightly bigger font */
-            font-weight: 700; 
-        }
-        /* --- End of Update --- */
+        .nav-item.active { color: #fff; transform: translateY(-5px); }
+        .nav-item i { font-size: 26px; margin-bottom: 4px; }
+        .nav-item span { font-size: 13px; font-weight: 700; }
 
         .tab-panel { display: none; height: 100%; overflow-y: auto; }
         .active-tab { display: block; }
@@ -229,9 +205,22 @@
                 }
             }
 
-            onSnapshot(doc(db, "users", tUser.id.toString()), (docSnap) => {
+            onSnapshot(doc(db, "users", tUser.id.toString()), async (docSnap) => {
                 if (docSnap.exists()) {
-                    window.user = docSnap.data();
+                    let userData = docSnap.data();
+                    const today = new Date().toDateString();
+
+                    // --- DAILY TASK & AD RESET LOGIC ---
+                    if (userData.last_reset_date !== today) {
+                        await updateDoc(doc(db, "users", tUser.id.toString()), {
+                            doneTasks: [],
+                            ad_count: 0,
+                            last_reset_date: today
+                        });
+                        return; // Exit and wait for the next snapshot
+                    }
+
+                    window.user = userData;
                     window.updateAppUI();
                 } else {
                     createNewUser();
@@ -255,31 +244,23 @@
         }
     }
 
+    // UPDATED AD SDK LOADER: Removed Auto Ads (In-App trigger)
     function loadMonetagSDK(zoneId) {
         const script = document.createElement('script');
         script.src = '//libtl.com/sdk.js';
         script.setAttribute('data-zone', zoneId);
         script.setAttribute('data-sdk', 'show_' + zoneId);
-        script.onload = () => {
-            const adFunc = 'show_' + zoneId;
-            if (typeof window[adFunc] === 'function') {
-                window[adFunc]({
-                    type: 'inApp',
-                    inAppSettings: {
-                        frequency: 2, capping: 0.1, interval: 30, timeout: 5, everyPage: false
-                    }
-                });
-            }
-        };
+        // Only load the script so handleAdLogic works, but don't call the auto ad function here
         document.head.appendChild(script);
     }
 
     async function createNewUser() {
+        const today = new Date().toDateString();
         window.user.referCode = "REF" + Math.floor(1000 + Math.random() * 9000);
         await setDoc(doc(db, "users", tUser.id.toString()), {
             id: tUser.id, name: tUser.first_name, username: tUser.username || "",
             balance: 0, referCode: window.user.referCode, doneTasks: [], usedCodes: [], 
-            ad_count: 0, last_ad_date: new Date().toDateString()
+            ad_count: 0, last_reset_date: today
         });
     }
 
@@ -385,6 +366,7 @@
         }
     };
 
+    // MANUAL AD LOGIC (Button Click)
     window.handleAdLogic = async function() {
         if (window.user.ad_count >= window.AppConfig.dailyAdLimit) return alert("Limit Reached!");
         
@@ -414,6 +396,7 @@
         listDiv.innerHTML = "";
         qSnap.forEach(doc => {
             const task = { id: doc.id, ...doc.data() };
+            // If task is not in doneTasks list, it will show
             if (!window.user.doneTasks.includes(task.id)) {
                 const isP = (localStorage.getItem('pending_task_id') === task.id);
                 listDiv.innerHTML += `<div class="task-card ${isP?'claim-mode':''}" onclick="handleTaskClick('${task.id}','${task.url}',${task.reward})"><div class="t-img-box">${isP?'<i class="fa-solid fa-gift"></i>':`<img src="${task.image}">`}</div><div class="t-info"><h4>${isP?'Claim Now':task.title}</h4><p>+${task.reward} ${window.AppConfig.coinName}</p></div></div>`;
