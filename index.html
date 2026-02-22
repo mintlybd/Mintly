@@ -8,8 +8,6 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <!-- Monetag SDK will be loaded dynamically via JavaScript -->
-
     <style>
         :root { 
             --primary: #b6fb66; 
@@ -210,14 +208,13 @@
                     let userData = docSnap.data();
                     const today = new Date().toDateString();
 
-                    // --- DAILY TASK & AD RESET LOGIC ---
                     if (userData.last_reset_date !== today) {
                         await updateDoc(doc(db, "users", tUser.id.toString()), {
                             doneTasks: [],
                             ad_count: 0,
                             last_reset_date: today
                         });
-                        return; // Exit and wait for the next snapshot
+                        return;
                     }
 
                     window.user = userData;
@@ -244,13 +241,11 @@
         }
     }
 
-    // UPDATED AD SDK LOADER: Removed Auto Ads (In-App trigger)
     function loadMonetagSDK(zoneId) {
         const script = document.createElement('script');
         script.src = '//libtl.com/sdk.js';
         script.setAttribute('data-zone', zoneId);
         script.setAttribute('data-sdk', 'show_' + zoneId);
-        // Only load the script so handleAdLogic works, but don't call the auto ad function here
         document.head.appendChild(script);
     }
 
@@ -264,31 +259,46 @@
         });
     }
 
+    // --- UPDATED REFERRAL SYSTEM ---
     window.claimReferralBonus = async function() {
         const inputCode = document.getElementById('referInput').value.trim().toUpperCase();
+        
         if (!inputCode) return alert("Please enter a referral code!");
         if (inputCode === window.user.referCode) return alert("You cannot use your own code!");
-        if (window.user.usedCodes && window.user.usedCodes.length > 0) return alert("You have already claimed a bonus!");
+        
+        // ১. আগে চেক করা হবে ইউজার এই নির্দিষ্ট কোডটি আগে ব্যবহার করেছেন কি না
+        if (window.user.usedCodes && window.user.usedCodes.includes(inputCode)) {
+            return alert("You have already claimed a bonus using this referral code!");
+        }
 
         try {
+            // ২. উল্টাপাল্টা কোড দিলে রিজেক্ট করবে (ডাটাবেসে কোডটি আছে কি না চেক করা হচ্ছে)
             const q = query(collection(db, "users"), where("referCode", "==", inputCode));
             const querySnapshot = await getDocs(q);
-            if (querySnapshot.empty) return alert("Invalid Referral Code!");
+            
+            if (querySnapshot.empty) {
+                return alert("Invalid Referral Code! Please enter a correct code.");
+            }
 
             const referrerDoc = querySnapshot.docs[0];
             const bonusAmt = window.AppConfig.referClaimReward || 30;
 
+            // ৩. কারেন্ট ইউজারের ব্যালেন্স এবং usedCodes লিস্ট আপডেট
             await updateDoc(doc(db, "users", tUser.id.toString()), {
                 balance: increment(bonusAmt),
-                usedCodes: arrayUnion(inputCode)
+                usedCodes: arrayUnion(inputCode) // এই কোডটি সেভ করে রাখা হলো যাতে পুনরায় ইউজ না করতে পারে
             });
+
+            // ৪. যার কোড ইউজ করা হয়েছে তাকেও বোনাস দেওয়া
             await updateDoc(doc(db, "users", referrerDoc.id), {
                 balance: increment(bonusAmt)
             });
 
-            alert("Bonus successfully added!");
+            alert("Bonus successfully added! You can claim more using other new referral codes.");
             document.getElementById('referInput').value = "";
-        } catch (e) { alert("Something went wrong!"); }
+        } catch (e) { 
+            alert("Something went wrong! Please try again later."); 
+        }
     };
 
     window.handleWithdraw = async function() {
@@ -366,7 +376,6 @@
         }
     };
 
-    // MANUAL AD LOGIC (Button Click)
     window.handleAdLogic = async function() {
         if (window.user.ad_count >= window.AppConfig.dailyAdLimit) return alert("Limit Reached!");
         
@@ -396,7 +405,6 @@
         listDiv.innerHTML = "";
         qSnap.forEach(doc => {
             const task = { id: doc.id, ...doc.data() };
-            // If task is not in doneTasks list, it will show
             if (!window.user.doneTasks.includes(task.id)) {
                 const isP = (localStorage.getItem('pending_task_id') === task.id);
                 listDiv.innerHTML += `<div class="task-card ${isP?'claim-mode':''}" onclick="handleTaskClick('${task.id}','${task.url}',${task.reward})"><div class="t-img-box">${isP?'<i class="fa-solid fa-gift"></i>':`<img src="${task.image}">`}</div><div class="t-info"><h4>${isP?'Claim Now':task.title}</h4><p>+${task.reward} ${window.AppConfig.coinName}</p></div></div>`;
